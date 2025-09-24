@@ -1,0 +1,17 @@
+{
+  "name": "candy-api-server",
+  "version": "1.1.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.10.0",
+    "bcrypt": "^5.1.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "rate-limit-express": "^1.0.0"
+  }
+}
