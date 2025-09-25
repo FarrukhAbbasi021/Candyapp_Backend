@@ -1,9 +1,4 @@
-
-// Candy PWA - API server (updated)
-// Usage: set environment variables:
-//   DATABASE_URL (Postgres connection string)
-//   JWT_SECRET (secret for signing admin session cookies)
-//   ADMIN_API_KEY (optional: additional admin key for automation)
+// server.js (updated)
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -12,22 +7,27 @@ const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(helmet());
 app.use(bodyParser.json());
 app.use(cookieParser());
 
-// Allow CORS from any origin and allow credentials (cookies)
-// In production, set origin to your frontend URL.
-app.use(cors({ origin: true, credentials: true }));
+// trust proxy so secure cookies work behind Render / proxies
+app.set('trust proxy', 1);
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://snakzplug.onrender.com';
+app.use(cors({ origin: FRONTEND_URL, credentials: true }));
 
 const connectionString = process.env.DATABASE_URL || process.env.POSTGRESQL_URI || process.env.PG_CONNECTION || '';
 if (!connectionString) {
   console.error("No DATABASE_URL / POSTGRESQL_URI provided. Set the env var and restart.");
-  // continue - server will error when trying to connect
 }
-const pool = new Pool({ connectionString, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+const pool = new Pool({
+  connectionString,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 const JWT_SECRET = process.env.JWT_SECRET || 'please_change_this_secret';
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
@@ -69,7 +69,6 @@ initDb().catch(e=>console.error("DB init error",e));
 
 // Helpers
 function requireAdminKey(req, res, next) {
-  // Allow if ADMIN_API_KEY not configured (development convenience)
   if (!ADMIN_API_KEY) return next();
   const provided = req.headers['x-admin-key'] || req.query.admin_key;
   if (!provided || provided !== ADMIN_API_KEY) {
@@ -100,10 +99,9 @@ app.get('/settings', async (req, res) => {
   } catch(e){ console.error(e); res.status(500).json({ ok:false, error:'server error' }); }
 });
 
-// Set settings (protected) - requires admin credentials (cookie) or admin key
+// Set settings (protected)
 app.post('/settings', async (req, res) => {
   try {
-    // allow using admin key OR existing session cookie
     const provided = req.headers['x-admin-key'] || req.query.admin_key;
     let allowed = false;
     if (ADMIN_API_KEY && provided === ADMIN_API_KEY) allowed = true;
@@ -121,11 +119,17 @@ app.post('/settings', async (req, res) => {
   } catch(e){ console.error(e); res.status(500).json({ ok:false, error:'server error' }); }
 });
 
-// Admin password set/change endpoint
+// Admin password set/change endpoint (improved)
 app.post('/admin/password', async (req, res) => {
   try {
-    const { password, current_password } = req.body;
-    if (!password || typeof password !== 'string' || password.length < 6) return res.status(400).json({ ok:false, error:'password min 6 chars' });
+    // Accept multiple key forms (frontend may send different names)
+    const password = req.body.password || req.body.new_password || req.body.newPassword;
+    const current_password = req.body.current_password || req.body.currentPassword || req.body.oldPassword || '';
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ ok:false, error:'password min 6 chars' });
+    }
+
     // check if password exists
     const r = await pool.query(`SELECT value FROM admin_settings WHERE key=$1`, ['admin_password']);
     if (r.rowCount === 0) {
@@ -138,11 +142,12 @@ app.post('/admin/password', async (req, res) => {
       let allowed = false;
       const provided = req.headers['x-admin-key'] || req.query.admin_key;
       if (ADMIN_API_KEY && provided === ADMIN_API_KEY) allowed = true;
-      // check session cookie
+
       const token = req.cookies && req.cookies.token;
       if (token) {
         try { jwt.verify(token, JWT_SECRET); allowed = true; } catch(e) {}
       }
+
       if (!allowed) {
         // verify current_password
         if (!current_password) return res.status(401).json({ ok:false, error:'current_password required' });
@@ -151,16 +156,17 @@ app.post('/admin/password', async (req, res) => {
         if (!match) return res.status(401).json({ ok:false, error:'wrong current password' });
         allowed = true;
       }
+
       if (allowed) {
         const newHash = await bcrypt.hash(password, 10);
         await pool.query(`INSERT INTO admin_settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, ['admin_password', newHash]);
         return res.json({ ok:true, message:'password updated' });
       }
     }
-  } catch(e){ console.error(e); res.status(500).json({ ok:false, error:'server error' }); }
+  } catch(e){ console.error('POST /admin/password error', e); res.status(500).json({ ok:false, error:'server error' }); }
 });
 
-// Auth endpoints: login (creates cookie), logout, verify
+// Auth endpoints
 app.post('/auth/login', async (req, res) => {
   try {
     const { password } = req.body;
@@ -171,14 +177,26 @@ app.post('/auth/login', async (req, res) => {
     const ok = await bcrypt.compare(password, hash);
     if (!ok) return res.status(401).json({ ok:false, error:'wrong password' });
     const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: '7d' });
-    // set cookie (HttpOnly)
-    res.cookie('token', token, { httpOnly: true, sameSite: 'lax' });
+
+    // cookie options: allow cross-site usage in production (SameSite=None + secure)
+    const cookieOptions = {
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    };
+
+    res.cookie('token', token, cookieOptions);
     res.json({ ok:true });
-  } catch(e){ console.error(e); res.status(500).json({ ok:false, error:'server error' }); }
+  } catch(e){ console.error('POST /auth/login error', e); res.status(500).json({ ok:false, error:'server error' }); }
 });
 
 app.post('/auth/logout', (req,res)=>{
-  res.clearCookie('token');
+  const cookieOptions = {
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  };
+  res.clearCookie('token', cookieOptions);
   res.json({ ok:true });
 });
 
@@ -193,9 +211,7 @@ app.get('/auth/me', (req,res)=>{
   }
 });
 
-// Orders: public endpoint to create an order and record payment info
-const { v4: uuidv4 } = require('uuid');
-
+// Orders & payments (unchanged)
 app.post('/orders', async (req, res) => {
   try {
     const { cart, subtotal, payment_type, payment_ref, customer_name, currency } = req.body;
@@ -203,20 +219,15 @@ app.post('/orders', async (req, res) => {
     const status = payment_type === 'cash' ? 'paid' : 'pending';
     const payload = { cart, subtotal, currency: currency || 'USD' };
     await pool.query(`INSERT INTO orders (id, payload, payment_type, payment_ref, status, customer_name) VALUES ($1,$2,$3,$4,$5,$6)`, [id, payload, payment_type, payment_ref || null, status, customer_name || null]);
-    // Also add a payment record
     await pool.query(`INSERT INTO payments (method, amount, currency, reference, status, meta) VALUES ($1,$2,$3,$4,$5,$6)`, [payment_type, subtotal || 0, currency || 'USD', payment_ref || null, status, JSON.stringify({ order_id: id })]);
-    // If Venmo/CashApp, also return a deep-link url to open app/web
-    // Read handles from settings
     const r = await pool.query(`SELECT key, value FROM admin_settings WHERE key IN ('cash_app_handle','venmo_handle')`);
     const handles = {};
     r.rows.forEach(row=>handles[row.key]=row.value);
     let payment_url = null;
     if (payment_type === 'cashapp' && handles.cash_app_handle) {
-      // Cash App web link format: https://cash.app/$Cashtag (amount query may or may not work universally)
-      const tag = handles.cash_app_handle.replace(/^\$?/,'');
+      const tag = handles.cash_app_handle.replace(/^\$?/,'' );
       payment_url = `https://cash.app/$${encodeURIComponent(tag)}?amount=${encodeURIComponent(String(subtotal||0))}`;
     } else if (payment_type === 'venmo' && handles.venmo_handle) {
-      // Venmo web payment link: https://venmo.com/{handle}?txn=pay&amount={amount}
       const handle = handles.venmo_handle.replace(/^@/,'').replace(/^\//,'');
       payment_url = `https://venmo.com/${encodeURIComponent(handle)}?txn=pay&amount=${encodeURIComponent(String(subtotal||0))}`;
     }
@@ -224,7 +235,6 @@ app.post('/orders', async (req, res) => {
   } catch(e){ console.error(e); res.status(500).json({ ok:false, error:'server error' }); }
 });
 
-// Admin: list orders (protected)
 app.get('/orders', requireAuth, async (req,res)=>{
   try {
     const r = await pool.query(`SELECT * FROM orders ORDER BY created_at DESC LIMIT 500`);
@@ -232,7 +242,6 @@ app.get('/orders', requireAuth, async (req,res)=>{
   } catch(e){ console.error(e); res.status(500).json({ ok:false, error:'server error' }); }
 });
 
-// Payments listing (protected)
 app.get('/payments', requireAuth, async (req,res)=>{
   try {
     const r = await pool.query(`SELECT * FROM payments ORDER BY created_at DESC LIMIT 500`);
