@@ -1,6 +1,4 @@
-/* Candy Admin integration (drop this file into your admin UI and include it)
-   It uses BACKEND_BASE global variable or window.BACKEND_BASE
-*/
+/* adminIntegration.js */
 const BACKEND_BASE =
   window.BACKEND_BASE ||
   window.__BACKEND_BASE__ ||
@@ -12,16 +10,24 @@ const BACKEND_BASE =
  * - For changing: provide the old password as currentPassword
  */
 async function setGlobalPassword(currentPassword, newPassword) {
-  const res = await fetch(BACKEND_BASE + "/admin/password", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      current_password: currentPassword || "",
-      password: newPassword,
-    }),
-    credentials: "include", // ensure auth cookie is sent/received
-  });
-  return res.json();
+  try {
+    const res = await fetch(BACKEND_BASE + "/admin/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        current_password: currentPassword || "",
+        password: newPassword,
+      }),
+      credentials: "include", // ensure cookie is sent/received
+    });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return data;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
@@ -29,34 +35,34 @@ async function setGlobalPassword(currentPassword, newPassword) {
  * This sets an auth cookie if successful.
  */
 async function verifyGlobalPassword(candidatePassword) {
-  const res = await fetch(BACKEND_BASE + "/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password: candidatePassword }),
-    credentials: "include",
-  });
-  return res.json();
+  try {
+    const res = await fetch(BACKEND_BASE + "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: candidatePassword }),
+      credentials: "include",
+    });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return data;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
  * Get public settings (safe for client side).
  */
 async function getPublicSettings() {
-  const res = await fetch(BACKEND_BASE + "/settings");
-  return res.json();
-}
-
-/**
- * Record a payment (normally used internally).
- */
-async function recordPayment(method, amount, reference, meta) {
-  const res = await fetch(BACKEND_BASE + "/payments", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ method, amount, reference, meta }),
-    credentials: "include",
-  });
-  return res.json();
+  try {
+    const res = await fetch(BACKEND_BASE + "/settings");
+    const data = await res.json().catch(()=>({}));
+    return data;
+  } catch (err) {
+    return { ok:false, error: err.message };
+  }
 }
 
 console.log("✅ Candy admin integration loaded. BACKEND_BASE =", BACKEND_BASE);
