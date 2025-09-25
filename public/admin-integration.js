@@ -8,30 +8,20 @@ const BACKEND_BASE =
 
 /**
  * Set or change the global admin password.
- * - For first time: pass "" as currentPassword
+ * - For first time: pass (null or "") as currentPassword
  * - For changing: provide the old password as currentPassword
  */
 async function setGlobalPassword(currentPassword, newPassword) {
-  try {
-    const res = await fetch(BACKEND_BASE + "/admin/password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        current_password: currentPassword || "",
-        password: newPassword,
-      }),
-      credentials: "include", // send/receive cookies
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.ok) {
-      throw new Error(data.error || "Failed to set password");
-    }
-
-    return data;
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  const res = await fetch(BACKEND_BASE + "/admin/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      current_password: currentPassword || "",
+      password: newPassword,
+    }),
+    credentials: "include", // ensure auth cookie is sent/received
+  });
+  return res.json();
 }
 
 /**
@@ -39,39 +29,13 @@ async function setGlobalPassword(currentPassword, newPassword) {
  * This sets an auth cookie if successful.
  */
 async function verifyGlobalPassword(candidatePassword) {
-  try {
-    const res = await fetch(BACKEND_BASE + "/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: candidatePassword }),
-      credentials: "include",
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.ok) {
-      throw new Error(data.error || "Login failed");
-    }
-
-    return data;
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-}
-
-/**
- * Get current admin session (optional helper).
- */
-async function getAdminSession() {
-  try {
-    const res = await fetch(BACKEND_BASE + "/auth/me", {
-      credentials: "include",
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error("Not logged in");
-    return data;
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+  const res = await fetch(BACKEND_BASE + "/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: candidatePassword }),
+    credentials: "include",
+  });
+  return res.json();
 }
 
 /**
@@ -83,7 +47,7 @@ async function getPublicSettings() {
 }
 
 /**
- * Record a payment (public order endpoint handles real logic).
+ * Record a payment (normally used internally).
  */
 async function recordPayment(method, amount, reference, meta) {
   const res = await fetch(BACKEND_BASE + "/payments", {
