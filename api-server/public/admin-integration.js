@@ -2,7 +2,7 @@
 /* Candy Admin integration (drop this file into your admin UI and include it)
    It uses BACKEND_BASE global variable or window.BACKEND_BASE
 */
-const BACKEND_BASE = window.BACKEND_BASE || window.__BACKEND_BASE__ || 'https://your-backend.example.com';
+const BACKEND_BASE = window.BACKEND_BASE || window.__BACKEND_BASE__ || 'https://snakzplug-backend.onrender.com';
 
 async function setGlobalPassword(adminApiKey, newPassword) {
   const res = await fetch(BACKEND_BASE + "/settings", {
