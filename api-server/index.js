@@ -1,24 +1,27 @@
 /**
  * Simple Express API server for Snakz Plug / Candyapp
- * - Use environment variable DATABASE_URL for Postgres (e.g. provided Render URL)
+ * - Use DATABASE_URL for Postgres
  * - Use ADMIN_PASSWORD for single-password admin login
  */
 
 const express = require("express");
-const bodyParser = require("body-parser");
 const pg = require("pg");
 const crypto = require("crypto");
-const cors = require("cors"); // ✅ use require, not import
+const cors = require("cors");
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json()); // ✅ modern replacement for body-parser
 
-// ✅ Enable CORS
+// ✅ Enable CORS for frontend + local dev
 app.use(
   cors({
-    origin: ["https://snakzplug.onrender.com", "http://localhost:5173"],
+    origin: [
+      "https://snakzplug.onrender.com",
+      "https://snakzplug-backend.onrender.com",
+      "http://localhost:5173",
+    ],
     methods: ["GET", "POST", "PATCH"],
-    allowedHeaders: ["Content-Type", "x-admin-password"], // ✅ fixed header name
+    allowedHeaders: ["Content-Type", "x-admin-password"],
   })
 );
 
@@ -28,6 +31,7 @@ const DATABASE_URL =
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 const PORT = process.env.PORT || 4000;
 
+// ✅ DB connection pool
 const pool = new pg.Pool({
   connectionString: DATABASE_URL,
   ssl:
@@ -49,7 +53,7 @@ async function withTx(client, cb) {
   }
 }
 
-// Health
+// Health check
 app.get("/api/health", async (req, res) => {
   try {
     await pool.query("SELECT 1");
@@ -59,9 +63,9 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
-/**
- * Store endpoints
- */
+/* ===============================
+   STORE ENDPOINTS
+================================= */
 app.get("/api/store", async (req, res) => {
   const { rows } = await pool.query("SELECT key, value FROM store_settings");
   const settings = {};
@@ -96,9 +100,9 @@ app.patch("/api/store", async (req, res) => {
   }
 });
 
-/**
- * Products endpoints
- */
+/* ===============================
+   PRODUCTS ENDPOINTS
+================================= */
 app.get("/api/products", async (req, res) => {
   const { rows } = await pool.query(
     "SELECT id, name, price_cents, stock, active, metadata FROM products WHERE active = true ORDER BY id"
@@ -120,6 +124,7 @@ app.post("/api/products", async (req, res) => {
   const adminPass = req.headers["x-admin-password"] || "";
   if (adminPass !== ADMIN_PASSWORD)
     return res.status(401).json({ error: "unauthorized" });
+
   const { name, price_cents, stock, active, metadata } = req.body;
   const { rows } = await pool.query(
     `INSERT INTO products (name, price_cents, stock, active, metadata) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
@@ -136,6 +141,7 @@ app.patch("/api/products/:id", async (req, res) => {
   const adminPass = req.headers["x-admin-password"] || "";
   if (adminPass !== ADMIN_PASSWORD)
     return res.status(401).json({ error: "unauthorized" });
+
   const id = Number(req.params.id);
   const { name, price_cents, stock_delta, stock, active, metadata } = req.body;
   const client = await pool.connect();
@@ -191,9 +197,7 @@ app.patch("/api/products/:id", async (req, res) => {
       if (updates.length > 0) {
         params.push(id);
         await client.query(
-          `UPDATE products SET ${updates.join(", ")} WHERE id = $${
-            params.length
-          }`,
+          `UPDATE products SET ${updates.join(", ")} WHERE id = $${params.length}`,
           params
         );
       }
@@ -209,9 +213,9 @@ app.patch("/api/products/:id", async (req, res) => {
   }
 });
 
-/**
- * Orders endpoints
- */
+/* ===============================
+   ORDERS ENDPOINTS
+================================= */
 app.post("/api/orders", async (req, res) => {
   const { items, customer } = req.body;
   if (!Array.isArray(items) || items.length === 0)
@@ -265,7 +269,9 @@ app.get("/api/orders", async (req, res) => {
   const adminPass = req.headers["x-admin-password"] || "";
   if (adminPass !== ADMIN_PASSWORD)
     return res.status(401).json({ error: "unauthorized" });
-  const { rows } = await pool.query("SELECT * FROM orders ORDER BY created_at DESC");
+  const { rows } = await pool.query(
+    "SELECT * FROM orders ORDER BY created_at DESC"
+  );
   res.json({ orders: rows });
 });
 
@@ -279,7 +285,9 @@ app.patch("/api/orders/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
-// Admin login
+/* ===============================
+   ADMIN LOGIN
+================================= */
 app.post("/api/admin/login", async (req, res) => {
   const { password } = req.body;
   if (password === ADMIN_PASSWORD) {
@@ -290,6 +298,7 @@ app.post("/api/admin/login", async (req, res) => {
   }
 });
 
+// ✅ Always bind to Render’s port
 app.listen(PORT, () => {
-  console.log("API server listening on", PORT);
+  console.log("🚀 API server listening on", PORT);
 });
