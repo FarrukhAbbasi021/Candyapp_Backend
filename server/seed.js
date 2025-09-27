@@ -10,9 +10,19 @@ const pool = new Pool({
   try {
     for (let p of products) {
       await pool.query(
-        `INSERT INTO products (name, price, stock, active) 
-         VALUES ($1, $2, $3, true)`,
-        [p.name, p.price, p.stock ?? 0]
+        `INSERT INTO products (id, name, price, stock_qty, is_active) 
+         VALUES ($1, $2, $3, $4, true)
+         ON CONFLICT (id) DO UPDATE 
+         SET name = EXCLUDED.name,
+             price = EXCLUDED.price,
+             stock_qty = EXCLUDED.stock_qty,
+             is_active = EXCLUDED.is_active`,
+        [
+          p.id || crypto.randomUUID(), // ensure id since products.id is PK
+          p.name,
+          p.price,
+          p.stock ?? 0
+        ]
       );
     }
     console.log('✅ Seed data inserted');
