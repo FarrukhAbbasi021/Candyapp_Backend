@@ -10,11 +10,20 @@ const sql = fs.readFileSync('migrations/create_tables.sql', 'utf8');
 
 (async () => {
   try {
-    await pool.query(sql);
-    console.log('Migrations applied');
+    // split on semicolons, filter out empty statements
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    for (let stmt of statements) {
+      await pool.query(stmt);
+    }
+
+    console.log('✅ Migrations applied');
     process.exit(0);
   } catch (e) {
-    console.error(e);
+    console.error('❌ Migration error:', e);
     process.exit(1);
   }
 })();
