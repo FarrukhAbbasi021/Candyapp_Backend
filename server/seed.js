@@ -10,14 +10,15 @@ const pool = new Pool({
   try {
     for (let p of products) {
       await pool.query(
-        'INSERT INTO products(name, price, stock) VALUES ($1,$2,$3)',
-        [p.name, p.price, p.stock]
+        `INSERT INTO products (name, price, stock, active) 
+         VALUES ($1, $2, $3, true)`,
+        [p.name, p.price, p.stock ?? 0]
       );
     }
-    console.log('Seed data inserted');
+    console.log('✅ Seed data inserted');
     process.exit(0);
   } catch (e) {
-    console.error(e);
+    console.error('❌ Error inserting seed data:', e);
     process.exit(1);
   }
 })();
